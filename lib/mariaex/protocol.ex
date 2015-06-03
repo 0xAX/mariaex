@@ -72,14 +72,14 @@ defmodule Mariaex.Protocol do
   def dispatch(packet(msg: ok_resp(affected_rows: affected_rows, last_insert_id: last_insert_id)), state = %{statement: statement, state: s})
    when s in [:handshake_send, :query_send, :execute_send] do
     command = get_command(statement)
-    rows = if (command in [:create, :insert, :update, :delete, :begin, :commit, :rollback]) do nil else [] end
+		rows = if (command in [:create, :insert, :update, :delete, :begin, :commit, :rollback]) do nil else [] end
     result = {:ok, %Mariaex.Result{command: command, columns: [], rows: rows, num_rows: affected_rows, last_insert_id: last_insert_id}}
     {_, state} = Connection.reply(result, state)
     close_statement(state)
   end
 
-  def dispatch(packet(msg: stmt_prepare_ok(statement_id: id, num_columns: columns, num_params: params)), state = %{statement: statement, state: :prepare_send, cache: cache}) do
-    :ets.insert(cache, {statement, id})
+  def dispatch(packet(msg: stmt_prepare_ok(statement_id: id, num_columns: columns, num_params: params)),
+               state = %{statement: statement, state: :prepare_send, cache: cache}) do		
     statedata = {params > 0, columns > 0}
     case statedata do
       {false, false} ->
@@ -156,11 +156,12 @@ defmodule Mariaex.Protocol do
     case command in [:insert, :select, :update, :delete, :call] do
       true ->
         case :ets.lookup(s.cache, statement) do
-          [{_, id}] ->
-            send_execute(%{ s | statement_id: id, statement: statement, parameters: params, parameter_types: [], types: [], state: :prepare_send, rows: []})
+          [{_, start_timestamp, id, time, num_params}] ->
+            send_execute(%{ s | statement_id: id, statement: statement,
+                            parameters: params, parameter_types: [], types: [], state: :prepare_send, rows: [], params_number: num_params})
           _ ->
             msg_send(text_cmd(command: com_stmt_prepare, statement: statement), s, 0)
-            %{s | statement: statement, parameters: params, parameter_types: [], types: [], state: :prepare_send, rows: []}
+            %{s | statement: statement, parameters: params, parameter_types: [], types: [], state: :prepare_send, rows: [], params_number: length(params)}
         end
       false when params == [] ->
         msg_send(text_cmd(command: com_query, statement: statement), s, 0)
@@ -171,12 +172,12 @@ defmodule Mariaex.Protocol do
     end
   end
 
-  defp send_execute(s = %{statement_id: id, parameters: parameters, parameter_types: types}) do
-    if length(parameters) == length(types) do
+  defp send_execute(s = %{statement_id: id, parameters: parameters, parameter_types: types, params_number: num_params}) do
+    if length(parameters) == num_params do
       parameters = Enum.zip(types, parameters)
       try do
         msg_send(stmt_execute(command: com_stmt_execute, parameters: parameters, statement_id: id), s, 0)
-        %{ s | state: :execute_send, substate: :column_count }
+        %{ s | state: :execute_send, substate: :column_count, params_number: num_params }
       catch
         :throw, :encoder_error ->
           abort_statement(s, "query has invalid parameters")
