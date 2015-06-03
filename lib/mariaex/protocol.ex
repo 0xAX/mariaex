@@ -48,15 +48,13 @@ defmodule Mariaex.Protocol do
 
   def dispatch(packet(msg: column_definition_41() = msg), state = %{statement_id: id, types: acc, substate: :column_definitions, cache: cache}) do
     column_definition_41(type: type, name: name) = msg
-		:io.format("id in lookup ~p~n", [id])
-    #case :ets.lookup(cache, id) do
-    #  [{id, num_params}] ->
-		#		#:io.format("AAAAAA~n")
-		#	  :ets.delete(cache, {id, num_params})
-		#		:ets.insert(cache, {id, num_params, [{name, type} | acc]})
-		#	_ ->
-		#		:new_query
-		#end
+		case :ets.lookup(cache, id) do
+      [{id, num_params}] ->
+				:ets.delete(cache, {id, num_params})
+				:ets.insert(cache, {id, num_params, [{name, type} | acc]})
+			_ ->
+				:new_query
+		end
 		
     %{ state | types: [{name, type} | acc] }
   end
@@ -85,13 +83,13 @@ defmodule Mariaex.Protocol do
 		rows = if (command in [:create, :insert, :update, :delete, :begin, :commit, :rollback]) do nil else [] end
     result = {:ok, %Mariaex.Result{command: command, columns: [], rows: rows, num_rows: affected_rows, last_insert_id: last_insert_id}}
     {_, state} = Connection.reply(result, state)
-		:io.format("result ~p~n", [result])
+		#:io.format("result ~p~n", [result])
     close_statement(state)
   end
 
   def dispatch(packet(msg: stmt_prepare_ok(statement_id: id, num_columns: columns, num_params: params)),
                state = %{statement: statement, state: :prepare_send, cache: cache}) do
-	:io.format("save this id ~p~n", [id])
+	#:io.format("save this id ~p~n", [id])
 	:ets.insert(cache, {id, params})
 	statedata = {params > 0, columns > 0}
     case statedata do
@@ -168,12 +166,14 @@ defmodule Mariaex.Protocol do
     command = get_command(statement)
     case command in [:insert, :select, :update, :delete, :call] do
       true ->
-				:io.format("before ets~n")
-				:io.format("id ~p~n", [id])
+				#id = case id do
+				#	nil -> 1
+				#	_ -> id + 1
+				#end
         case :ets.lookup(s.cache, id) do
-          [{id, num_params}] ->
+          [{id, num_params, types}] ->
             send_execute(%{ s | statement_id: id, statement: statement,
-                            parameters: params, parameter_types: [], types: [], state: :prepare_send, rows: [], params_number: num_params})
+                            parameters: params, parameter_types: [], types: types, state: :prepare_send, rows: [], params_number: num_params})
           _ ->
             msg_send(text_cmd(command: com_stmt_prepare, statement: statement), s, 0)
             %{s | statement: statement, parameters: params, parameter_types: [], types: [], state: :prepare_send, rows: [], params_number: length(params)}

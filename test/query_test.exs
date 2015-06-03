@@ -344,4 +344,5 @@ defmodule QueryTest do
     :ok = query("INSERT INTO test_nullbit VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [nil, "t1", nil, "t3", nil, "t5", nil, "t7"])
     assert query("SELECT * FROM test_nullbit WHERE t1 = 't1'", []) == [{nil, "t1", nil, "t3", nil, "t5", nil, "t7"}]
   end
+
 end
