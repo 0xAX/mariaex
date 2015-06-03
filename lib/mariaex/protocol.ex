@@ -46,8 +46,18 @@ defmodule Mariaex.Protocol do
     abort_statement(state, code, message)
   end
 
-  def dispatch(packet(msg: column_definition_41() = msg), state = %{types: acc, substate: :column_definitions}) do
+  def dispatch(packet(msg: column_definition_41() = msg), state = %{statement_id: id, types: acc, substate: :column_definitions, cache: cache}) do
     column_definition_41(type: type, name: name) = msg
+		:io.format("id in lookup ~p~n", [id])
+    case :ets.lookup(cache, id) do
+      [{id, num_params}] ->
+				#:io.format("AAAAAA~n")
+			  :ets.delete(cache, {id, num_params})
+				:ets.insert(cache, {id, num_params, [{name, type} | acc]})
+			_ ->
+				:new_query
+		end
+		
     %{ state | types: [{name, type} | acc] }
   end
 
@@ -75,12 +85,15 @@ defmodule Mariaex.Protocol do
 		rows = if (command in [:create, :insert, :update, :delete, :begin, :commit, :rollback]) do nil else [] end
     result = {:ok, %Mariaex.Result{command: command, columns: [], rows: rows, num_rows: affected_rows, last_insert_id: last_insert_id}}
     {_, state} = Connection.reply(result, state)
+		:io.format("result ~p~n", [result])
     close_statement(state)
   end
 
   def dispatch(packet(msg: stmt_prepare_ok(statement_id: id, num_columns: columns, num_params: params)),
-               state = %{statement: statement, state: :prepare_send, cache: cache}) do		
-    statedata = {params > 0, columns > 0}
+               state = %{statement: statement, state: :prepare_send, cache: cache}) do
+	:io.format("save this id ~p~n", [id])
+	:ets.insert(cache, {id, params})
+	statedata = {params > 0, columns > 0}
     case statedata do
       {false, false} ->
         send_execute(%{ state | statement_id: id})
@@ -151,14 +164,20 @@ defmodule Mariaex.Protocol do
     sock_mod.send(sock, data)
   end
 
-  def send_query(statement, params, s) do
+  def send_query(statement, params, %{statement_id: id} = s) do
     command = get_command(statement)
     case command in [:insert, :select, :update, :delete, :call] do
       true ->
-        case :ets.lookup(s.cache, statement) do
-          [{_, start_timestamp, id, time, num_params}] ->
+				:io.format("before ets~n")
+				:io.format("id ~p~n", [id])
+				#id = case id do
+				#			 nil -> 1;
+				#			 id -> id + 1
+				end
+        case :ets.lookup(s.cache, id + 1) do
+          [{id, num_params, types}] ->
             send_execute(%{ s | statement_id: id, statement: statement,
-                            parameters: params, parameter_types: [], types: [], state: :prepare_send, rows: [], params_number: num_params})
+                            parameters: params, parameter_types: [], types: types, state: :prepare_send, rows: [], params_number: num_params})
           _ ->
             msg_send(text_cmd(command: com_stmt_prepare, statement: statement), s, 0)
             %{s | statement: statement, parameters: params, parameter_types: [], types: [], state: :prepare_send, rows: [], params_number: length(params)}
@@ -172,9 +191,14 @@ defmodule Mariaex.Protocol do
     end
   end
 
-  defp send_execute(s = %{statement_id: id, parameters: parameters, parameter_types: types, params_number: num_params}) do
+  defp send_execute(s = %{statement: statement, statement_id: id, parameters: parameters, parameter_types: types, params_number: num_params}) do
     if length(parameters) == num_params do
+			:io.format("parameters now ~p~n", [parameters])
+			:io.format("types ~p~n", [types])
       parameters = Enum.zip(types, parameters)
+			#:io.format("parameters ~p~n", [parameters])
+			#:io.format("num_params ~p~n", [num_params])
+			#:io.format("statement ~p~n", [statement])
       try do
         msg_send(stmt_execute(command: com_stmt_execute, parameters: parameters, statement_id: id), s, 0)
         %{ s | state: :execute_send, substate: :column_count, params_number: num_params }
