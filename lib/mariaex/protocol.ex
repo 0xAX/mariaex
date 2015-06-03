@@ -49,14 +49,14 @@ defmodule Mariaex.Protocol do
   def dispatch(packet(msg: column_definition_41() = msg), state = %{statement_id: id, types: acc, substate: :column_definitions, cache: cache}) do
     column_definition_41(type: type, name: name) = msg
 		:io.format("id in lookup ~p~n", [id])
-    case :ets.lookup(cache, id) do
-      [{id, num_params}] ->
-				#:io.format("AAAAAA~n")
-			  :ets.delete(cache, {id, num_params})
-				:ets.insert(cache, {id, num_params, [{name, type} | acc]})
-			_ ->
-				:new_query
-		end
+    #case :ets.lookup(cache, id) do
+    #  [{id, num_params}] ->
+		#		#:io.format("AAAAAA~n")
+		#	  :ets.delete(cache, {id, num_params})
+		#		:ets.insert(cache, {id, num_params, [{name, type} | acc]})
+		#	_ ->
+		#		:new_query
+		#end
 		
     %{ state | types: [{name, type} | acc] }
   end
@@ -170,14 +170,10 @@ defmodule Mariaex.Protocol do
       true ->
 				:io.format("before ets~n")
 				:io.format("id ~p~n", [id])
-				#id = case id do
-				#			 nil -> 1;
-				#			 id -> id + 1
-				end
-        case :ets.lookup(s.cache, id + 1) do
-          [{id, num_params, types}] ->
+        case :ets.lookup(s.cache, id) do
+          [{id, num_params}] ->
             send_execute(%{ s | statement_id: id, statement: statement,
-                            parameters: params, parameter_types: [], types: types, state: :prepare_send, rows: [], params_number: num_params})
+                            parameters: params, parameter_types: [], types: [], state: :prepare_send, rows: [], params_number: num_params})
           _ ->
             msg_send(text_cmd(command: com_stmt_prepare, statement: statement), s, 0)
             %{s | statement: statement, parameters: params, parameter_types: [], types: [], state: :prepare_send, rows: [], params_number: length(params)}
